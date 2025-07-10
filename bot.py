@@ -1,5 +1,6 @@
 import pyautogui
 import time
+import json
 from dataclasses import dataclass
 from typing import List
 
@@ -10,30 +11,37 @@ class Point:
 
 class MinimaxTicTacToeBot:
     def __init__(self):
-        self.cells = {
-            0: {'center': Point(333, 378)},
-            1: {'center': Point(486, 354)},
-            2: {'center': Point(626, 357)},
-            3: {'center': Point(327, 505)},
-            4: {'center': Point(473, 507)},
-            5: {'center': Point(629, 508)},
-            6: {'center': Point(330, 651)},
-            7: {'center': Point(479, 651)},
-            8: {'center': Point(633, 649)}
-        }
+      from dataclasses import dataclass
 
-        self.board = [0] * 9
-        self.bot_symbol = 1
-        self.player_symbol = 2
-        self.bot_goes_first = True
+      @dataclass
+      class Point:
+        x: int
+        y: int
 
-        self.winning_combinations = [
-            [0, 1, 2], [3, 4, 5], [6, 7, 8],
-            [0, 3, 6], [1, 4, 7], [2, 5, 8],
-            [0, 4, 8], [2, 4, 6]
-        ]
+      self.Point = Point  
 
-        pyautogui.PAUSE = 0.4
+
+
+      with open("coords.json") as f:
+          raw_cells = json.load(f)
+      self.cells = {
+          int(k): {'center': Point(v['center']['x'], v['center']['y'])}
+          for k, v in raw_cells.items()
+      }
+
+      self.board = [0] * 9
+      self.bot_symbol = 1
+      self.player_symbol = 2
+      self.bot_goes_first = True
+
+      self.winning_combinations = [
+        [0, 1, 2], [3, 4, 5], [6, 7, 8],
+        [0, 3, 6], [1, 4, 7], [2, 5, 8],
+        [0, 4, 8], [2, 4, 6]
+    ]
+
+    pyautogui.PAUSE = 0.4
+
 
     def ask_who_is_bot(self):
         choice = input("Vrei ca botul să fie X (primul) sau O (al doilea)? [X/O]: ").strip().upper()
