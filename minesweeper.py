@@ -98,6 +98,7 @@ class MinesweeperGame:
                                 command=lambda r=i, c=j: self.left_click(r, c))
                 btn.grid(row=i, column=j, padx=1, pady=1)
                 btn.bind("<Button-3>", lambda e, r=i, c=j: self.right_click(r, c))
+                btn.bind("<Button-2>", lambda e, r=i, c=j: self.middle_click(r, c))  # Middle click for chord
                 row.append(btn)
             self.buttons.append(row)
 
@@ -127,9 +128,9 @@ class MinesweeperGame:
 
     def count_adjacent_mines(self, row, col):
         return sum(self.mines[i][j]
-                   for i in range(max(0, row - 1), min(self.rows, row + 2))
-                   for j in range(max(0, col - 1), min(self.cols, col + 2))
-                   if (i, j) != (row, col))
+               for i in range(max(0, row - 1), min(self.rows, row + 2))
+               for j in range(max(0, col - 1), min(self.cols, col + 2))
+               if (i, j) != (row, col))
 
     def get_neighbors(self, row, col):
         return [(i, j)
@@ -153,11 +154,32 @@ class MinesweeperGame:
         self.update_display()
         self.check_win()
 
+    def middle_click(self, row, col):
+        """Implementarea regulii 'chord' - click mijlociu pe celule dezvăluite"""
+        if self.game_state != GameState.PLAYING or self.board[row][col] != CellState.REVEALED:
+            return
+
+        neighbors = self.get_neighbors(row, col)
+        flagged = sum(1 for nr, nc in neighbors if self.board[nr][nc] == CellState.FLAGGED)
+        hidden = [(nr, nc) for nr, nc in neighbors if self.board[nr][nc] == CellState.HIDDEN]
+
+        if flagged == self.numbers[row][col] and hidden:
+            for nr, nc in hidden:
+                if self.mines[nr][nc]:
+                    self.end_game()
+                    return
+                self.reveal(nr, nc)
+            
+            self.update_display()
+            self.check_win()
+
     def right_click(self, row, col):
         if self.game_state != GameState.PLAYING or self.board[row][col] == CellState.REVEALED:
             return
 
         if self.board[row][col] == CellState.HIDDEN:
+            if self.flags_placed >= self.mine_count:
+                return  # Nu putem pune mai multe steaguri decât mine
             self.board[row][col] = CellState.FLAGGED
             self.flags_placed += 1
         else:
@@ -174,6 +196,7 @@ class MinesweeperGame:
         self.board[row][col] = CellState.REVEALED
         self.cells_revealed += 1
 
+        # Revelare automată a celulelor goale
         if self.numbers[row][col] == 0:
             for nr, nc in self.get_neighbors(row, col):
                 if self.board[nr][nc] == CellState.HIDDEN:
@@ -189,27 +212,47 @@ class MinesweeperGame:
                         btn.config(text="💣", bg="red")
                     else:
                         num = self.numbers[i][j]
-                        btn.config(text=str(num) if num > 0 else "", bg="lightgray")
+                        colors = ["", "blue", "green", "red", "darkblue", 
+                                 "brown", "cyan", "black", "gray"]
+                        btn.config(text=str(num) if num > 0 else "", 
+                                 fg=colors[num] if num > 0 else "black",
+                                 bg="lightgray")
                 elif state == CellState.FLAGGED:
                     btn.config(text="🚩", bg="yellow")
                 else:
                     btn.config(text="", bg="SystemButtonFace")
 
     def check_win(self):
+        # Verificăm dacă toate celulele fără mine au fost dezvăluite
         if self.cells_revealed == self.rows * self.cols - self.mine_count:
             self.game_state = GameState.WON
             self.bot_active = False
             self.bot_button.config(text="Start Bot", bg="green")
+            
+            # Marchează toate minele cu steaguri
+            for i in range(self.rows):
+                for j in range(self.cols):
+                    if self.mines[i][j] and self.board[i][j] != CellState.FLAGGED:
+                        self.board[i][j] = CellState.FLAGGED
+                        self.flags_placed += 1
+            
+            self.update_display()
             messagebox.showinfo("Bravo!", "Ai câștigat!")
 
     def end_game(self):
         self.game_state = GameState.LOST
         self.bot_active = False
         self.bot_button.config(text="Start Bot", bg="green")
+        
+        # Arată toate minele
         for i in range(self.rows):
             for j in range(self.cols):
                 if self.mines[i][j]:
-                    self.buttons[i][j].config(text="💣", bg="red")
+                    if self.board[i][j] == CellState.FLAGGED and not self.mines[i][j]:
+                        self.buttons[i][j].config(text="❌", bg="red")  # Steag greșit
+                    elif self.board[i][j] != CellState.FLAGGED:
+                        self.buttons[i][j].config(text="💣", bg="red")  # Mină neexplodată
+        
         messagebox.showinfo("Game Over", "Ai lovit o mină!")
 
     def update_info(self):
@@ -224,7 +267,8 @@ class MinesweeperGame:
             messagebox.showwarning("Info", "Fă primul click manual.")
             return
         self.bot_active = not self.bot_active
-        self.bot_button.config(text="Stop Bot" if self.bot_active else "Start Bot", bg="red" if self.bot_active else "green")
+        self.bot_button.config(text="Stop Bot" if self.bot_active else "Start Bot", 
+                             bg="red" if self.bot_active else "green")
         if self.bot_active:
             self.run_bot()
 
@@ -235,70 +279,57 @@ class MinesweeperGame:
         def logic():
             while self.bot_active and self.game_state == GameState.PLAYING:
                 if not self.bot_move():
-                    self.bot_active = False
-                    self.bot_button.config(text="Start Bot", bg="green")
-                    break
+                    # Dacă nu mai găsește mișcări sigure, face o mișcare aleatorie
+                    hidden_cells = [(i, j) for i in range(self.rows) for j in range(self.cols)
+                                  if self.board[i][j] == CellState.HIDDEN]
+                    if hidden_cells:
+                        row, col = random.choice(hidden_cells)
+                        self.root.after(0, lambda r=row, c=col: self.left_click(r, c))
+                        self.bot_stats["moves"] += 1
+                        self.bot_stats["reveals"] += 1
+                        self.root.after(0, self.update_info)
+                    else:
+                        self.bot_active = False
+                        self.root.after(0, lambda: self.bot_button.config(text="Start Bot", bg="green"))
                 time.sleep(self.bot_speed)
 
         threading.Thread(target=logic, daemon=True).start()
 
     def bot_move(self):
+        # Strategia 1: Revelare sigură
         for i in range(self.rows):
             for j in range(self.cols):
-                if self.board[i][j] != CellState.REVEALED:
-                    continue
-                neighbors = self.get_neighbors(i, j)
-                flagged = [n for n in neighbors if self.board[n[0]][n[1]] == CellState.FLAGGED]
-                hidden = [n for n in neighbors if self.board[n[0]][n[1]] == CellState.HIDDEN]
-
-                if len(flagged) == self.numbers[i][j] and hidden:
-                    nr, nc = hidden[0]
-                    self.root.after(0, lambda r=nr, c=nc: self.left_click(r, c))
-                    self.bot_stats["moves"] += 1
-                    self.bot_stats["reveals"] += 1
-                    self.root.after(0, self.update_info)
-                    return True
-
-        for i in range(self.rows):
-            for j in range(self.cols):
-                if self.board[i][j] != CellState.REVEALED:
-                    continue
-                neighbors = self.get_neighbors(i, j)
-                flagged = [n for n in neighbors if self.board[n[0]][n[1]] == CellState.FLAGGED]
-                hidden = [n for n in neighbors if self.board[n[0]][n[1]] == CellState.HIDDEN]
-                if self.numbers[i][j] - len(flagged) == len(hidden) and hidden:
-                    nr, nc = hidden[0]
-                    self.root.after(0, lambda r=nr, c=nc: self.right_click(r, c))
-                    self.bot_stats["moves"] += 1
-                    self.bot_stats["flags"] += 1
-                    self.root.after(0, self.update_info)
-                    return True
-
-        hidden_cells = [(i, j) for i in range(self.rows) for j in range(self.cols)
-                        if self.board[i][j] == CellState.HIDDEN]
-        if hidden_cells:
-            row, col = random.choice(hidden_cells)
-            self.root.after(0, lambda r=row, c=col: self.left_click(r, c))
-            self.bot_stats["moves"] += 1
-            self.bot_stats["reveals"] += 1
-            self.root.after(0, self.update_info)
-            return True
-
+                if self.board[i][j] == CellState.REVEALED and self.numbers[i][j] > 0:
+                    neighbors = self.get_neighbors(i, j)
+                    hidden = [n for n in neighbors if self.board[n[0]][n[1]] == CellState.HIDDEN]
+                    flagged = [n for n in neighbors if self.board[n[0]][n[1]] == CellState.FLAGGED]
+                    
+                    # Toate minele sunt marcate, dezvăluie celelalte
+                    if len(flagged) == self.numbers[i][j] and hidden:
+                        for nr, nc in hidden:
+                            self.root.after(0, lambda r=nr, c=nc: self.left_click(r, c))
+                            self.bot_stats["moves"] += 1
+                            self.bot_stats["reveals"] += 1
+                        self.root.after(0, self.update_info)
+                        return True
+                    
+                    # Numărul de celule ascunse egal cu minele rămase, marchează-le
+                    if len(hidden) == (self.numbers[i][j] - len(flagged)) and hidden:
+                        for nr, nc in hidden:
+                            if self.board[nr][nc] != CellState.FLAGGED:
+                                self.root.after(0, lambda r=nr, c=nc: self.right_click(r, c))
+                                self.bot_stats["moves"] += 1
+                                self.bot_stats["flags"] += 1
+                        self.root.after(0, self.update_info)
+                        return True
+        
+        # Strategia 2: Analiză mai complexă a probabilităților
+        # (Aici poți adăuga logica pentru analiza probabilităților)
+        
         return False
 
     def run(self):
         self.root.mainloop()
-
-# PyAutoGUI (opțional, pentru automatizare externă)
-def automate_with_pyautogui():
-    print("Așază mouse-ul pe primul buton și apasă Enter...")
-    input()
-    pos = pyautogui.position()
-    print(f"Poziția inițială: {pos}")
-    for _ in range(3):
-        pyautogui.click()
-        time.sleep(0.5)
-        pyautogui.move(30, 0)
 
 if __name__ == "__main__":
     game = MinesweeperGame()
